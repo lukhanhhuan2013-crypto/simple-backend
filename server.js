@@ -11,9 +11,14 @@ app.use(cors());
 const LOG_DIR = path.join(__dirname, "logs");
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
-function appendLog(line) {
+function prependLog(line) {
   const file = path.join(LOG_DIR, "logins.txt");
-  fs.appendFileSync(file, line, { encoding: "utf8" });
+  let oldContent = "";
+  if (fs.existsSync(file)) {
+    oldContent = fs.readFileSync(file, "utf8");
+  }
+  const newContent = line + oldContent; // chèn log mới lên đầu
+  fs.writeFileSync(file, newContent, { encoding: "utf8" });
 }
 
 // Trang mặc định
@@ -28,8 +33,7 @@ app.post("/log-login", (req, res) => {
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  // Ghi log: chỉ thời gian, tên học sinh, IP
-  const logLine = 
+  const logLine =
 `🕒 Thời gian: ${new Date().toLocaleString("vi-VN")}
 👤 Học sinh: ${user}
 🌐 IP: ${ip}
@@ -37,7 +41,7 @@ app.post("/log-login", (req, res) => {
 `;
 
   try {
-    appendLog(logLine);
+    prependLog(logLine);
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
