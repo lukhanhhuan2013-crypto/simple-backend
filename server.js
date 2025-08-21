@@ -33,9 +33,13 @@ app.post("/log-login", (req, res) => {
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
+  // Lấy phần tên học sinh (ẩn 3 số cuối của mật khẩu)
+  const nameOnly =
+    user && user.length > 3 ? user.slice(0, -3) : user;
+
   const logLine =
-`🕒 Thời gian: ${new Date().toLocaleString("vi-VN")}
-👤 Học sinh: ${user}
+`📌 Học sinh ${nameOnly} vừa đăng nhập thành công
+🕒 Lúc: ${new Date().toLocaleString("vi-VN")}
 🌐 IP: ${ip}
 ----------------------------------------
 `;
