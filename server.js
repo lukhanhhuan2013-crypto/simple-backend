@@ -16,10 +16,12 @@ function appendLog(line) {
   fs.appendFileSync(file, line, { encoding: "utf8" });
 }
 
+// Trang mặc định
 app.get("/", (req, res) => {
   res.send("✅ Backend đang chạy!");
 });
 
+// API ghi log khi có học sinh đăng nhập
 app.post("/log-login", (req, res) => {
   const { user, password, time, userAgent } = req.body;
   const ip =
@@ -34,6 +36,17 @@ app.post("/log-login", (req, res) => {
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
     res.status(500).json({ ok: false, error: "write_failed" });
+  }
+});
+
+// 🔹 API mới: xem log trên trình duyệt
+app.get("/get-logs", (req, res) => {
+  const file = path.join(LOG_DIR, "logins.txt");
+  if (fs.existsSync(file)) {
+    const content = fs.readFileSync(file, "utf8");
+    res.type("text/plain").send(content);
+  } else {
+    res.type("text/plain").send("Chưa có log nào.");
   }
 });
 
