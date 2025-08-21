@@ -33,13 +33,34 @@ app.post("/log-login", (req, res) => {
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  // Lấy phần tên học sinh (ẩn 3 số cuối của mật khẩu)
-  const nameOnly =
-    user && user.length > 3 ? user.slice(0, -3) : user;
+  const logLine =
+`📌 Học sinh ${user} vừa đăng nhập thành công
+🕒 Lúc: ${new Date().toLocaleString("vi-VN")}
+🌐 IP: ${ip}
+----------------------------------------
+`;
+
+  try {
+    prependLog(logLine);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("❌ Lỗi ghi log:", e);
+    res.status(500).json({ ok: false, error: "write_failed" });
+  }
+});
+
+// API ghi log khi học sinh báo cáo kết quả
+app.post("/log-submit", (req, res) => {
+  const { user, unit, correct, total, score, startTime, endTime } = req.body;
+  const ip =
+    req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
+    req.socket.remoteAddress;
 
   const logLine =
-`📌 Học sinh ${nameOnly} vừa đăng nhập thành công
-🕒 Lúc: ${new Date().toLocaleString("vi-VN")}
+`✅ Học sinh ${user} vừa báo cáo:
+📝 Thẻ: ${unit}
+📊 Thực hành: ${correct}/${total} câu đạt ${score} điểm
+🕒 Đăng nhập: ${startTime} kết thúc lúc ${endTime}
 🌐 IP: ${ip}
 ----------------------------------------
 `;
