@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const moment = require("moment-timezone"); // thêm thư viện moment-timezone
+const moment = require("moment-timezone"); // dùng moment-timezone để fix múi giờ
 
 const app = express();
 app.use(express.json());
@@ -30,6 +30,11 @@ function getTimeVN(date = new Date()) {
 // Trang mặc định
 app.get("/", (req, res) => {
   res.send("✅ Backend đang chạy!");
+});
+
+// Route test múi giờ (dùng để kiểm tra nhanh sau khi deploy)
+app.get("/time-test", (req, res) => {
+  res.send("⏰ Giờ Việt Nam hiện tại: " + getTimeVN());
 });
 
 // API ghi log khi có học sinh đăng nhập
@@ -62,7 +67,7 @@ app.post("/log-submit", (req, res) => {
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  // luôn dùng giờ server VN, không lấy startTime/endTime từ client gửi lên
+  // Dùng giờ server VN cho start & end
   const startVN = getTimeVN();
   const endVN = getTimeVN();
 
