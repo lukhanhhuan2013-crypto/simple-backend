@@ -100,7 +100,8 @@ app.get("/get-logs", (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 10000;
+// 🚨 BẮT BUỘC dùng đúng process.env.PORT cho Render
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`🚀 Server chạy ở cổng ${PORT}`);
 });
