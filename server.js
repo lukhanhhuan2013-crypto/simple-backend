@@ -1,107 +1,88 @@
 const express = require("express");
-const cors = require("cors");
-const fs = require("fs");
+const bodyParser = require("body-parser");
+const moment = require("moment-timezone");
+const { google } = require("googleapis");
 const path = require("path");
-const moment = require("moment-timezone"); // dùng moment-timezone để fix múi giờ
 
 const app = express();
-app.use(express.json());
-app.use(cors());
+app.use(bodyParser.json());
 
-// Tạo thư mục logs nếu chưa có
-const LOG_DIR = path.join(__dirname, "logs");
-if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
+// === Cấu hình Google Drive ===
+const KEYFILEPATH = path.join(__dirname, "credentials.json"); // file JSON key
+const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+const FOLDER_ID = "1AN893uuTEf_8DjOfZRWLk_fGwRv1HuzN"; // Folder ID Google Drive
 
-function prependLog(line) {
-  const file = path.join(LOG_DIR, "logins.txt");
-  let oldContent = "";
-  if (fs.existsSync(file)) {
-    oldContent = fs.readFileSync(file, "utf8");
-  }
-  const newContent = line + oldContent; // chèn log mới lên đầu
-  fs.writeFileSync(file, newContent, { encoding: "utf8" });
-}
-
-// Hàm lấy thời gian VN chuẩn
-function getTimeVN(date = new Date()) {
-  return moment(date).tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
-}
-
-// Trang mặc định
-app.get("/", (req, res) => {
-  res.send("✅ Backend đang chạy!");
+const auth = new google.auth.GoogleAuth({
+  keyFile: KEYFILEPATH,
+  scopes: SCOPES,
 });
+const drive = google.drive({ version: "v3", auth });
 
-// Route test múi giờ (dùng để kiểm tra nhanh sau khi deploy)
-app.get("/time-test", (req, res) => {
-  res.send("⏰ Giờ Việt Nam hiện tại: " + getTimeVN());
-});
+// === Hàm lưu log vào Drive ===
+async function saveLogToDrive(username, logText) {
+  const safeName = `${username}.txt`;
 
-// API ghi log khi có học sinh đăng nhập
-app.post("/log-login", (req, res) => {
-  const { user } = req.body;
-  const ip =
-    req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
-    req.socket.remoteAddress;
+  // Kiểm tra file đã tồn tại chưa
+  const res = await drive.files.list({
+    q: `'${FOLDER_ID}' in parents and name='${safeName}' and trashed=false`,
+    fields: "files(id, name)",
+  });
 
-  const logLine =
-`📌 Học sinh ${user} vừa đăng nhập thành công
-🕒 Lúc: ${getTimeVN()}
-🌐 IP: ${ip}
-----------------------------------------
-`;
+  if (res.data.files.length > 0) {
+    const fileId = res.data.files[0].id;
 
-  try {
-    prependLog(logLine);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error("❌ Lỗi ghi log:", e);
-    res.status(500).json({ ok: false, error: "write_failed" });
-  }
-});
+    // Lấy nội dung cũ
+    const contentRes = await drive.files.get(
+      { fileId, alt: "media" },
+      { responseType: "text" }
+    );
+    const oldContent = contentRes.data || "";
 
-// API ghi log khi học sinh báo cáo kết quả
-app.post("/log-submit", (req, res) => {
-  const { user, unit, correct, total, score } = req.body;
-  const ip =
-    req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
-    req.socket.remoteAddress;
-
-  // Dùng giờ server VN cho start & end
-  const startVN = getTimeVN();
-  const endVN = getTimeVN();
-
-  const logLine =
-`✅ Học sinh ${user} vừa báo cáo:
-📝 Thẻ: ${unit}
-📊 Thực hành: ${correct}/${total} câu đạt ${score} điểm
-🕒 Đăng nhập: ${startVN} kết thúc lúc ${endVN}
-🌐 IP: ${ip}
-----------------------------------------
-`;
-
-  try {
-    prependLog(logLine);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error("❌ Lỗi ghi log:", e);
-    res.status(500).json({ ok: false, error: "write_failed" });
-  }
-});
-
-// API: xem log trên trình duyệt
-app.get("/get-logs", (req, res) => {
-  const file = path.join(LOG_DIR, "logins.txt");
-  if (fs.existsSync(file)) {
-    const content = fs.readFileSync(file, "utf8");
-    res.type("text/plain").send(content);
+    // Ghi thêm log mới (prepend lên đầu)
+    const newContent = logText + "\n" + oldContent;
+    const media = {
+      mimeType: "text/plain",
+      body: newContent,
+    };
+    await drive.files.update({
+      fileId,
+      media,
+    });
   } else {
-    res.type("text/plain").send("Chưa có log nào.");
+    // Nếu chưa có file thì tạo mới
+    const fileMetadata = {
+      name: safeName,
+      parents: [FOLDER_ID],
+    };
+    const media = {
+      mimeType: "text/plain",
+      body: logText,
+    };
+    await drive.files.create({
+      resource: fileMetadata,
+      media,
+      fields: "id",
+    });
+  }
+}
+
+// === API log đăng nhập ===
+app.post("/log-login", async (req, res) => {
+  const { user, ip } = req.body;
+  const timeVN = moment().tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
+  const logLine = `📌 Học sinh ${user} đăng nhập thành công\n🕒 Lúc: ${timeVN}\n🌐 IP: ${ip}\n`;
+
+  try {
+    await saveLogToDrive(user, logLine);
+    res.json({ ok: true, message: "Đã ghi log vào Google Drive" });
+  } catch (err) {
+    console.error("❌ Lỗi khi ghi Drive:", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// 🚨 BẮT BUỘC dùng đúng process.env.PORT cho Render
-const PORT = process.env.PORT;
+// === Khởi động server ===
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server chạy ở cổng ${PORT}`);
 });
