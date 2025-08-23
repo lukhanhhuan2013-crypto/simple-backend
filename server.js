@@ -7,11 +7,13 @@ const moment = require("moment-timezone"); // dùng moment-timezone để fix m�
 const app = express();
 app.use(express.json());
 app.use(cors());
+app.set("trust proxy", true); // lấy IP qua x-forwarded-for chính xác hơn
 
 // Tạo thư mục logs nếu chưa có
 const LOG_DIR = path.join(__dirname, "logs");
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
+// --- Giữ nguyên: log tổng prepend lên đầu file ---
 function prependLog(line) {
   const file = path.join(LOG_DIR, "logins.txt");
   let oldContent = "";
@@ -22,10 +24,14 @@ function prependLog(line) {
   fs.writeFileSync(file, newContent, { encoding: "utf8" });
 }
 
-// --- Thêm hàm ghi log riêng từng học sinh ---
+// --- MỚI: ghi log riêng cho từng học sinh (append) ---
+function safeUsername(u) {
+  return (u ?? "").toString().trim().replace(/[^a-zA-Z0-9_-]/g, "");
+}
 function appendUserLog(user, line) {
-  const safeName = user.replace(/[^a-zA-Z0-9_-]/g, "");
-  const file = path.join(LOG_DIR, `${safeName}.txt`);
+  const name = safeUsername(user);
+  if (!name) return; // không tạo file khi tên trống
+  const file = path.join(LOG_DIR, `${name}.txt`);
   fs.appendFileSync(file, line, { encoding: "utf8" });
 }
 
@@ -33,6 +39,11 @@ function appendUserLog(user, line) {
 function getTimeVN(date = new Date()) {
   return moment(date).tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
 }
+
+// Health check (giúp Render xác nhận service sẵn sàng)
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", time: new Date().toISOString() });
+});
 
 // Trang mặc định
 app.get("/", (req, res) => {
@@ -59,8 +70,8 @@ app.post("/log-login", (req, res) => {
 `;
 
   try {
-    prependLog(logLine);        // log tổng
-    appendUserLog(user, logLine); // log riêng
+    prependLog(logLine);         // log tổng (prepend)
+    appendUserLog(user, logLine); // log riêng (append)
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -89,8 +100,8 @@ app.post("/log-submit", (req, res) => {
 `;
 
   try {
-    prependLog(logLine);        // log tổng
-    appendUserLog(user, logLine); // log riêng
+    prependLog(logLine);          // log tổng (prepend)
+    appendUserLog(user, logLine); // log riêng (append)
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -101,27 +112,31 @@ app.post("/log-submit", (req, res) => {
 // API: xem log tổng trên trình duyệt
 app.get("/get-logs", (req, res) => {
   const file = path.join(LOG_DIR, "logins.txt");
+  res.type("text/plain; charset=utf-8");
   if (fs.existsSync(file)) {
     const content = fs.readFileSync(file, "utf8");
-    res.type("text/plain").send(content);
+    res.send(content);
   } else {
-    res.type("text/plain").send("Chưa có log nào.");
+    res.send("Chưa có log nào.");
   }
 });
 
-// --- API: xem log riêng của học sinh ---
+// --- MỚI: xem log riêng của học sinh, path dạng /TenHocSinh.txt ---
 app.get("/:username.txt", (req, res) => {
-  const safeName = req.params.username.replace(/[^a-zA-Z0-9_-]/g, "");
+  const safeName = safeUsername(req.params.username);
   const file = path.join(LOG_DIR, `${safeName}.txt`);
+  res.type("text/plain; charset=utf-8");
+  if (!safeName) return res.status(404).send("Tên học sinh không hợp lệ.");
   if (fs.existsSync(file)) {
     const content = fs.readFileSync(file, "utf8");
-    res.type("text/plain").send(content);
+    res.send(content);
   } else {
-    res.type("text/plain").send(`Chưa có log nào cho ${safeName}.`);
+    res.send(`Chưa có log nào cho ${safeName}.`);
   }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
+// ràng buộc 0.0.0.0 để chắc chắn Render bắt được cổng lắng nghe
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server chạy ở cổng ${PORT}`);
 });
