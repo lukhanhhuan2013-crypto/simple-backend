@@ -1,7 +1,7 @@
 {
   "name": "simple-backend",
   "version": "1.0.0",
-  "description": "Simple backend for logging student activities with VN timezone + Google Drive backup",
+  "description": "Simple backend for logging student activities with VN timezone",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -9,8 +9,6 @@
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "moment-timezone": "^0.5.45",
-    "googleapis": "^135.0.0",
-    "body-parser": "^1.20.2"
+    "moment-timezone": "^0.5.45"
   }
 }
