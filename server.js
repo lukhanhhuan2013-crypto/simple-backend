@@ -47,74 +47,57 @@ function getTimeVN(date = new Date()) {
 // ===== GitHub sync (với retry khi sha mismatch) =====
 async function saveLogsToGitHub(filename, content) {
   if (!GITHUB_TOKEN) {
-    console.warn("⚠️ Chưa có GITHUB_TOKEN — bỏ qua đồng bộ GitHub:", filename);
+    console.warn("⚠️ Chưa có GITHUB_TOKEN, bỏ qua đồng bộ GitHub");
     return;
   }
-
   const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURI(
     filename
   )}`;
-  const headers = {
-    Authorization: `token ${GITHUB_TOKEN}`,
-    "User-Agent": "simple-backend",
-  };
+  const headers = { Authorization: `token ${GITHUB_TOKEN}` };
   const encoded = Buffer.from(content, "utf8").toString("base64");
 
   let sha;
   try {
     const res = await axios.get(apiUrl, { headers });
-    sha = res.data && res.data.sha ? res.data.sha : undefined;
-  } catch (err) {
+    sha = res.data.sha;
+  } catch {
     sha = undefined; // file chưa tồn tại
   }
 
   try {
-    await axios.put(
-      apiUrl,
-      { message: `Update ${filename}`, content: encoded, sha },
-      { headers }
-    );
+    await axios.put(apiUrl, { message: `Update ${filename}`, content: encoded, sha }, { headers });
     console.log(`✅ Đồng bộ GitHub thành công: ${filename}`);
   } catch (err) {
     if (err.response?.data?.message?.includes("expected")) {
-      // retry khi sha mismatch
       try {
         const res2 = await axios.get(apiUrl, { headers });
-        const newSha = res2.data && res2.data.sha ? res2.data.sha : undefined;
+        const newSha = res2.data.sha;
         await axios.put(
           apiUrl,
           { message: `Retry update ${filename}`, content: encoded, sha: newSha },
           { headers }
         );
         console.log(`✅ Retry GitHub thành công: ${filename}`);
-        return;
       } catch (err2) {
-        console.error(
-          `❌ Retry thất bại (${filename}):`,
-          err2.response?.data || err2.message
-        );
+        console.error(`❌ Retry thất bại (${filename}):`, err2.response?.data || err2.message);
       }
     } else {
-      console.error(
-        `❌ Lỗi đồng bộ GitHub (${filename}):`,
-        err.response?.data || err.message
-      );
+      console.error(`❌ Lỗi đồng bộ GitHub (${filename}):`, err.response?.data || err.message);
     }
   }
 }
 
-// ===== Logging functions =====
+// ===== Ghi log tổng (prepend) =====
 function prependLog(line) {
   const file = path.join(LOG_DIR, "logins.txt");
   let oldContent = "";
   if (fs.existsSync(file)) oldContent = fs.readFileSync(file, "utf8");
   const newContent = line + oldContent;
   fs.writeFileSync(file, newContent, { encoding: "utf8" });
-  saveLogsToGitHub("logs/logins.txt", newContent).catch((e) =>
-    console.error(e.message)
-  );
+  saveLogsToGitHub("logs/logins.txt", newContent);
 }
 
+// ===== Ghi log cá nhân (append) =====
 function appendUserLog(originalUser, line) {
   const short = shortenUser(originalUser);
   const safe = safeUsernameForFile(short);
@@ -124,59 +107,65 @@ function appendUserLog(originalUser, line) {
   let old = "";
   if (fs.existsSync(file)) old = fs.readFileSync(file, "utf8");
 
-  // Trong log cá nhân, thay originalUser bằng short để không lộ 3 số
+  // thay originalUser trong log bằng short để không lộ 3 số
   const lineForPersonal = line.replace(new RegExp(originalUser, "g"), short);
   const newContent = old + lineForPersonal;
 
   fs.writeFileSync(file, newContent, { encoding: "utf8" });
-  saveLogsToGitHub(`logs/${safe}.txt`, newContent).catch((e) =>
-    console.error(e.message)
-  );
+  saveLogsToGitHub(`logs/${safe}.txt`, newContent);
 }
 
-// ===== Routes =====
-app.get("/", (req, res) =>
-  res.send("✅ Backend đang chạy (shortnames + GitHub backup + time fix).")
-);
+// ===== ROUTES =====
 
-app.get("/time-test", (req, res) =>
-  res.send("⏰ Giờ Việt Nam hiện tại: " + getTimeVN())
-);
+// Health check
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", time: new Date().toISOString() });
+});
 
+// Trang mặc định
+app.get("/", (req, res) => {
+  res.send("✅ Backend đang chạy (shortnames + GitHub backup + retry + time fix)!");
+});
+
+// Test giờ
+app.get("/time-test", (req, res) => {
+  res.send("⏰ Giờ Việt Nam hiện tại: " + getTimeVN());
+});
+
+// ===== /log-login =====
 app.post("/log-login", (req, res) => {
-  try {
-    const { user } = req.body;
-    const ip =
-      req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
-      req.socket.remoteAddress;
-    const nowVN = getTimeVN();
+  const { user } = req.body;
+  const ip =
+    req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
+    req.socket.remoteAddress;
 
-    const logLine = `📌 Học sinh ${user} vừa đăng nhập thành công
-🕒 Lúc: ${nowVN}
+  const logLine = `📌 Học sinh ${user} vừa đăng nhập thành công
+🕒 Lúc: ${getTimeVN()}
 🌐 IP: ${ip}
 ----------------------------------------
 `;
 
+  try {
     prependLog(logLine);
     appendUserLog(user, logLine);
     res.json({ ok: true });
   } catch (e) {
-    console.error("❌ /log-login error:", e);
+    console.error("❌ Lỗi ghi log:", e);
     res.status(500).json({ ok: false, error: "write_failed" });
   }
 });
 
+// ===== /log-submit =====
 app.post("/log-submit", (req, res) => {
-  try {
-    const { user, unit, correct, total, score, startTime, endTime } = req.body;
-    const ip =
-      req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
-      req.socket.remoteAddress;
+  const { user, unit, correct, total, score, startTime, endTime } = req.body;
+  const ip =
+    req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
+    req.socket.remoteAddress;
 
-    const startVN = formatVNMaybe(startTime);
-    const endVN = formatVNMaybe(endTime);
+  const startVN = formatVNMaybe(startTime);
+  const endVN = formatVNMaybe(endTime);
 
-    const logLine = `✅ Học sinh ${user} vừa báo cáo:
+  const logLine = `✅ Học sinh ${user} vừa báo cáo:
 📝 Thẻ: ${unit}
 📊 Thực hành: ${correct}/${total} câu đạt ${score} điểm
 🕒 Đăng nhập: ${startVN} kết thúc lúc ${endVN}
@@ -184,15 +173,17 @@ app.post("/log-submit", (req, res) => {
 ----------------------------------------
 `;
 
+  try {
     prependLog(logLine);
     appendUserLog(user, logLine);
     res.json({ ok: true });
   } catch (e) {
-    console.error("❌ /log-submit error:", e);
+    console.error("❌ Lỗi ghi log:", e);
     res.status(500).json({ ok: false, error: "write_failed" });
   }
 });
 
+// ===== /get-logs =====
 app.get("/get-logs", (req, res) => {
   const file = path.join(LOG_DIR, "logins.txt");
   res.type("text/plain; charset=utf-8");
@@ -204,8 +195,9 @@ app.get("/get-logs", (req, res) => {
   }
 });
 
+// ===== /:username.txt =====
 app.get("/:username.txt", (req, res) => {
-  const raw = req.params.username || "";
+  const raw = req.params.username;
   const short = shortenUser(raw);
   const safe = safeUsernameForFile(short);
   const file = path.join(LOG_DIR, `${safe}.txt`);
@@ -219,8 +211,8 @@ app.get("/:username.txt", (req, res) => {
   }
 });
 
-// ===== Start =====
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, "0.0.0.0", () => {
+// ===== START SERVER =====
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
   console.log(`🚀 Server chạy ở cổng ${PORT}`);
 });

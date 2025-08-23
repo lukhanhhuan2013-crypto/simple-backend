@@ -1,7 +1,7 @@
 {
   "name": "simple-backend",
   "version": "1.2.0",
-  "description": "Simple backend for logging student activities with VN timezone + GitHub backup",
+  "description": "Simple backend for logging student activities with VN timezone + GitHub backup + retry + short username",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
