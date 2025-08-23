@@ -1,14 +1,13 @@
 {
-  "name": "simple-backend",
+  "name": "simple-logs",
   "version": "1.0.0",
-  "description": "Simple backend for logging student activities with VN timezone",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "cors": "^2.8.5",
+    "express": "^4.18.2",
     "moment-timezone": "^0.5.45"
   }
 }

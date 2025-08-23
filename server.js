@@ -2,49 +2,29 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const moment = require("moment-timezone"); // dùng moment-timezone để fix múi giờ
+const moment = require("moment-timezone");
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// === Thư mục logs cục bộ ===
 const LOG_DIR = path.join(__dirname, "logs");
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
-// Hàm lấy giờ VN chuẩn
-function getTimeVN(date = new Date()) {
-  return moment(date).tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
+// Hàm trả giờ VN
+function getTimeVN() {
+  return moment().tz("Asia/Ho_Chi_Minh").format("YYYY-MM-DD HH:mm:ss");
 }
 
-// Ghi log lên đầu file
-function prependFile(filePath, line) {
+// Ghi thêm log vào đầu file
+function prependLog(filename, text) {
+  const file = path.join(LOG_DIR, filename);
   let old = "";
-  if (fs.existsSync(filePath)) {
-    old = fs.readFileSync(filePath, "utf8");
-  }
-  fs.writeFileSync(filePath, line + old, { encoding: "utf8" });
+  if (fs.existsSync(file)) old = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, text + old, "utf8");
 }
 
-// Ghi vào log tổng + log cá nhân
-function writeBoth(user, line) {
-  const mainFile = path.join(LOG_DIR, "logins.txt");
-  const personalFile = path.join(LOG_DIR, `${user}.txt`);
-  prependFile(mainFile, line);
-  prependFile(personalFile, line);
-}
-
-// === Routes ===
-app.get("/", (req, res) => {
-  res.send("✅ Backend đang chạy!");
-});
-
-// Route test múi giờ (dùng để kiểm tra nhanh sau khi deploy)
-app.get("/time-test", (req, res) => {
-  res.send("⏰ Giờ Việt Nam hiện tại: " + getTimeVN());
-});
-
-// API: ghi log khi học sinh đăng nhập
+// API: đăng nhập
 app.post("/log-login", (req, res) => {
   const { user } = req.body;
   if (!user) return res.status(400).json({ ok: false, error: "missing_user" });
@@ -53,75 +33,62 @@ app.post("/log-login", (req, res) => {
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  const logLine =
-`📌 Học sinh ${user} vừa đăng nhập thành công
-🕒 Lúc: ${getTimeVN()}
-🌐 IP: ${ip}
-----------------------------------------
-`;
+  const time = getTimeVN();
+  const line = `🔑 Học sinh ${user} đăng nhập lúc ${time} từ IP ${ip}\n`;
 
   try {
-    writeBoth(user, logLine);
+    prependLog("logins.txt", line);
+    prependLog(`${user}.txt`, line);
     res.json({ ok: true });
   } catch (e) {
-    console.error("❌ Lỗi ghi log (login):", e);
-    res.status(500).json({ ok: false, error: "write_failed" });
+    console.error(e);
+    res.status(500).json({ ok: false });
   }
 });
 
-// API: ghi log khi học sinh báo cáo điểm
-app.post("/log-submit", (req, res) => {
-  const { user, unit, correct, total, score, details } = req.body;
+// API: báo cáo điểm
+app.post("/log-report", (req, res) => {
+  const { user, unit, correct, total, score } = req.body;
   if (!user) return res.status(400).json({ ok: false, error: "missing_user" });
 
   const ip =
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  // Dùng giờ server VN cho start & end
-  const startVN = getTimeVN();
-  const endVN = getTimeVN();
-
-  const logLine =
-`✅ Học sinh ${user} vừa báo cáo:
-📝 Thẻ: ${unit ?? "N/A"}
-📊 Thực hành: ${correct ?? "N/A"}/${total ?? "N/A"} câu đạt ${score ?? "N/A"} điểm
-🕒 Từ ${startVN} → ${endVN}
-🧾 Chi tiết: ${details || "Không có"}
-🌐 IP: ${ip}
-----------------------------------------
-`;
+  const time = getTimeVN();
+  const line = `📊 Học sinh ${user} báo cáo: Thẻ ${unit}, ${correct}/${total} câu, ${score} điểm, lúc ${time}, IP ${ip}\n`;
 
   try {
-    writeBoth(user, logLine);
+    prependLog("logins.txt", line);
+    prependLog(`${user}.txt`, line);
     res.json({ ok: true });
   } catch (e) {
-    console.error("❌ Lỗi ghi log (submit):", e);
-    res.status(500).json({ ok: false, error: "write_failed" });
+    console.error(e);
+    res.status(500).json({ ok: false });
   }
 });
 
-// API: xem log tổng
+// API: xem toàn bộ logs
 app.get("/get-logs", (req, res) => {
   const file = path.join(LOG_DIR, "logins.txt");
   if (fs.existsSync(file)) {
-    const content = fs.readFileSync(file, "utf8");
-    res.type("text/plain").send(content);
+    res.type("text/plain").send(fs.readFileSync(file, "utf8"));
   } else {
     res.type("text/plain").send("Chưa có log nào.");
   }
 });
 
-// API: xem log cá nhân qua URL /tenhocsinh.txt (vd: /Lan123.txt)
-app.get("/:username.txt", (req, res) => {
-  const file = path.join(LOG_DIR, `${req.params.username}.txt`);
+// API: xem log cá nhân
+app.get("/:user.txt", (req, res) => {
+  const file = path.join(LOG_DIR, `${req.params.user}.txt`);
   if (fs.existsSync(file)) {
     res.type("text/plain").send(fs.readFileSync(file, "utf8"));
   } else {
-    res.type("text/plain").send(`Chưa có log nào cho học sinh ${req.params.username}.`);
+    res.type("text/plain").send(`Chưa có log cho ${req.params.user}`);
   }
 });
 
+// Cổng server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server chạy ở cổng ${PORT}`);
