@@ -22,6 +22,13 @@ function prependLog(line) {
   fs.writeFileSync(file, newContent, { encoding: "utf8" });
 }
 
+// --- Thêm hàm ghi log riêng từng học sinh ---
+function appendUserLog(user, line) {
+  const safeName = user.replace(/[^a-zA-Z0-9_-]/g, "");
+  const file = path.join(LOG_DIR, `${safeName}.txt`);
+  fs.appendFileSync(file, line, { encoding: "utf8" });
+}
+
 // Hàm lấy thời gian VN chuẩn
 function getTimeVN(date = new Date()) {
   return moment(date).tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
@@ -52,7 +59,8 @@ app.post("/log-login", (req, res) => {
 `;
 
   try {
-    prependLog(logLine);
+    prependLog(logLine);        // log tổng
+    appendUserLog(user, logLine); // log riêng
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -81,7 +89,8 @@ app.post("/log-submit", (req, res) => {
 `;
 
   try {
-    prependLog(logLine);
+    prependLog(logLine);        // log tổng
+    appendUserLog(user, logLine); // log riêng
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -89,7 +98,7 @@ app.post("/log-submit", (req, res) => {
   }
 });
 
-// API: xem log trên trình duyệt
+// API: xem log tổng trên trình duyệt
 app.get("/get-logs", (req, res) => {
   const file = path.join(LOG_DIR, "logins.txt");
   if (fs.existsSync(file)) {
@@ -97,6 +106,18 @@ app.get("/get-logs", (req, res) => {
     res.type("text/plain").send(content);
   } else {
     res.type("text/plain").send("Chưa có log nào.");
+  }
+});
+
+// --- API: xem log riêng của học sinh ---
+app.get("/:username.txt", (req, res) => {
+  const safeName = req.params.username.replace(/[^a-zA-Z0-9_-]/g, "");
+  const file = path.join(LOG_DIR, `${safeName}.txt`);
+  if (fs.existsSync(file)) {
+    const content = fs.readFileSync(file, "utf8");
+    res.type("text/plain").send(content);
+  } else {
+    res.type("text/plain").send(`Chưa có log nào cho ${safeName}.`);
   }
 });
 
