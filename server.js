@@ -2,18 +2,37 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const moment = require("moment-timezone");
 const { google } = require("googleapis");
-const path = require("path");
+const cors = require("cors");
+const stream = require("stream");
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
 
-// === Cấu hình Google Drive ===
-const KEYFILEPATH = path.join(__dirname, "credentials.json"); // file JSON key
+// === Config Google Drive ===
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
-const FOLDER_ID = "1AN893uuTEf_8DjOfZRWLk_fGwRv1HuzN"; // Folder ID Google Drive
+const FOLDER_ID = "1AN893uuTEf_8DjOfZRWLk_fGwRv1HuzN";
+
+// Service Account credentials
+const credentials = {
+  type: "service_account",
+  project_id: "studentlogdrive",
+  private_key_id: "7bf9e340d066a699928b7ee03482584249341e1c",
+  private_key: `-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDlTw0SDwv0cqKd
+... (nguyên private key bạn dán vào đây) ...
+-----END PRIVATE KEY-----`,
+  client_email: "student-logger@studentlogdrive.iam.gserviceaccount.com",
+  client_id: "101463262477754521378",
+  auth_uri: "https://accounts.google.com/o/oauth2/auth",
+  token_uri: "https://oauth2.googleapis.com/token",
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+  client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/student-logger%40studentlogdrive.iam.gserviceaccount.com",
+  universe_domain: "googleapis.com"
+};
 
 const auth = new google.auth.GoogleAuth({
-  keyFile: KEYFILEPATH,
+  credentials,
   scopes: SCOPES,
 });
 const drive = google.drive({ version: "v3", auth });
@@ -22,7 +41,7 @@ const drive = google.drive({ version: "v3", auth });
 async function saveLogToDrive(username, logText) {
   const safeName = `${username}.txt`;
 
-  // Kiểm tra file đã tồn tại chưa
+  // Kiểm tra file tồn tại
   const res = await drive.files.list({
     q: `'${FOLDER_ID}' in parents and name='${safeName}' and trashed=false`,
     fields: "files(id, name)",
@@ -34,33 +53,42 @@ async function saveLogToDrive(username, logText) {
     // Lấy nội dung cũ
     const contentRes = await drive.files.get(
       { fileId, alt: "media" },
-      { responseType: "text" }
+      { responseType: "stream" }
     );
-    const oldContent = contentRes.data || "";
 
-    // Ghi thêm log mới (prepend lên đầu)
+    let oldContent = "";
+    await new Promise((resolve, reject) => {
+      contentRes.data.on("data", (chunk) => {
+        oldContent += chunk.toString();
+      });
+      contentRes.data.on("end", resolve);
+      contentRes.data.on("error", reject);
+    });
+
+    // Ghi thêm log mới
     const newContent = logText + "\n" + oldContent;
-    const media = {
-      mimeType: "text/plain",
-      body: newContent,
-    };
+    const bufferStream = new stream.PassThrough();
+    bufferStream.end(Buffer.from(newContent, "utf-8"));
+
     await drive.files.update({
       fileId,
-      media,
+      media: {
+        mimeType: "text/plain",
+        body: bufferStream,
+      },
     });
   } else {
-    // Nếu chưa có file thì tạo mới
-    const fileMetadata = {
-      name: safeName,
-      parents: [FOLDER_ID],
-    };
-    const media = {
-      mimeType: "text/plain",
-      body: logText,
-    };
+    // Tạo mới file
+    const bufferStream = new stream.PassThrough();
+    bufferStream.end(Buffer.from(logText, "utf-8"));
+
+    const fileMetadata = { name: safeName, parents: [FOLDER_ID] };
     await drive.files.create({
       resource: fileMetadata,
-      media,
+      media: {
+        mimeType: "text/plain",
+        body: bufferStream,
+      },
       fields: "id",
     });
   }
@@ -68,13 +96,32 @@ async function saveLogToDrive(username, logText) {
 
 // === API log đăng nhập ===
 app.post("/log-login", async (req, res) => {
-  const { user, ip } = req.body;
+  const { user } = req.body;
+  const clientIp = req.headers["x-forwarded-for"]?.split(",")[0] || req.ip;
   const timeVN = moment().tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
-  const logLine = `📌 Học sinh ${user} đăng nhập thành công\n🕒 Lúc: ${timeVN}\n🌐 IP: ${ip}\n`;
+
+  const logLine = `📌 Học sinh ${user} đăng nhập thành công\n🕒 Lúc: ${timeVN}\n🌐 IP: ${clientIp}\n`;
 
   try {
     await saveLogToDrive(user, logLine);
     res.json({ ok: true, message: "Đã ghi log vào Google Drive" });
+  } catch (err) {
+    console.error("❌ Lỗi khi ghi Drive:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// === API log báo cáo điểm ===
+app.post("/log-submit", async (req, res) => {
+  const { user, unit, correct, total, score, startTime, endTime, details } = req.body;
+  const clientIp = req.headers["x-forwarded-for"]?.split(",")[0] || req.ip;
+  const timeVN = moment().tz("Asia/Ho_Chi_Minh").format("HH:mm:ss DD/MM/YYYY");
+
+  const logLine = `📘 Unit: ${unit}\n👤 Học sinh: ${user}\n🕒 Từ ${startTime} → ${endTime} (ghi lúc ${timeVN})\n✅ Kết quả: ${correct}/${total} (${score})\n🧾 Chi tiết: ${details}\n🌐 IP: ${clientIp}\n-------------------------\n`;
+
+  try {
+    await saveLogToDrive(user, logLine);
+    res.json({ ok: true, message: "Đã ghi báo cáo vào Google Drive" });
   } catch (err) {
     console.error("❌ Lỗi khi ghi Drive:", err);
     res.status(500).json({ ok: false, error: err.message });
