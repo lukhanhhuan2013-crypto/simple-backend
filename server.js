@@ -51,6 +51,23 @@ async function saveLogsToGitHub(filename, content) {
   }
 }
 
+// ===== Xử lý tên học sinh =====
+function normalizeUser(u) {
+  return (u ?? "").toString().trim();
+}
+
+// Bỏ 3 số cuối nếu có
+function shortenUser(u) {
+  return normalizeUser(u).replace(/\d{3}$/, "");
+}
+
+function safeUsername(u) {
+  return (u ?? "")
+    .toString()
+    .trim()
+    .replace(/[^a-zA-Z0-9_]/g, ""); // chữ + số + _
+}
+
 // ===== Ghi log tổng (prepend) =====
 function prependLog(line) {
   const file = path.join(LOG_DIR, "logins.txt");
@@ -58,25 +75,21 @@ function prependLog(line) {
   if (fs.existsSync(file)) oldContent = fs.readFileSync(file, "utf8");
   const newContent = line + oldContent;
   fs.writeFileSync(file, newContent, { encoding: "utf8" });
-  saveLogsToGitHub("logs/logins.txt", newContent); // backup vào folder logs/
+  saveLogsToGitHub("logs/logins.txt", newContent);
 }
 
 // ===== Ghi log cá nhân (append) =====
-function safeUsername(u) {
-  return (u ?? "")
-    .toString()
-    .trim()
-    .replace(/[^a-zA-Z_]/g, ""); // chỉ giữ chữ cái + dấu _
-}
 function appendUserLog(user, line) {
-  const name = safeUsername(user);
-  if (!name) return;
-  const file = path.join(LOG_DIR, `${name}.txt`);
+  const shortName = shortenUser(user);       // bỏ 3 số cuối
+  const safeName = safeUsername(shortName);  // làm sạch
+  if (!safeName) return;
+
+  const file = path.join(LOG_DIR, `${safeName}.txt`);
   let old = "";
   if (fs.existsSync(file)) old = fs.readFileSync(file, "utf8");
   const newContent = old + line;
   fs.writeFileSync(file, newContent, { encoding: "utf8" });
-  saveLogsToGitHub(`logs/${name}.txt`, newContent); // backup vào folder logs/
+  saveLogsToGitHub(`logs/${safeName}.txt`, newContent);
 }
 
 // ===== Giờ VN =====
@@ -93,7 +106,7 @@ app.get("/health", (req, res) => {
 
 // Trang mặc định
 app.get("/", (req, res) => {
-  res.send("✅ Backend đang chạy (có GitHub backup trong thư mục logs/)!");
+  res.send("✅ Backend đang chạy (log cá nhân gom theo tên rút gọn)!");
 });
 
 // Test giờ
@@ -115,8 +128,8 @@ app.post("/log-login", (req, res) => {
 `;
 
   try {
-    prependLog(logLine);
-    appendUserLog(user, logLine);
+    prependLog(logLine);         // log tổng giữ nguyên tên
+    appendUserLog(user, logLine); // log cá nhân gom theo tên rút gọn
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -147,8 +160,8 @@ app.post("/log-submit", (req, res) => {
 `;
 
   try {
-    prependLog(logLine);
-    appendUserLog(user, logLine);
+    prependLog(logLine);         // log tổng giữ nguyên tên
+    appendUserLog(user, logLine); // log cá nhân gom theo tên rút gọn
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ Lỗi ghi log:", e);
@@ -170,7 +183,7 @@ app.get("/get-logs", (req, res) => {
 
 // ===== /:username.txt =====
 app.get("/:username.txt", (req, res) => {
-  const name = safeUsername(req.params.username);
+  const name = safeUsername(shortenUser(req.params.username));
   const file = path.join(LOG_DIR, `${name}.txt`);
   res.type("text/plain; charset=utf-8");
   if (!name) return res.status(404).send("Tên học sinh không hợp lệ.");
