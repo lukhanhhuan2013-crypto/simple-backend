@@ -9,6 +9,9 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// === Bộ nhớ tạm trên server để xem logs qua API ===
+let allLogs = [];
+
 // === Config Google Drive ===
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 const FOLDER_ID = "1AN893uuTEf_8DjOfZRWLk_fGwRv1HuzN";
@@ -20,7 +23,7 @@ const credentials = {
   private_key_id: "7bf9e340d066a699928b7ee03482584249341e1c",
   private_key: `-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDlTw0SDwv0cqKd
-... (nguyên private key bạn dán vào đây) ...
+... (toàn bộ private key của bạn) ...
 -----END PRIVATE KEY-----`,
   client_email: "student-logger@studentlogdrive.iam.gserviceaccount.com",
   client_id: "101463262477754521378",
@@ -37,11 +40,10 @@ const auth = new google.auth.GoogleAuth({
 });
 const drive = google.drive({ version: "v3", auth });
 
-// === Hàm lưu log vào Drive ===
+// === Hàm lưu log vào Google Drive ===
 async function saveLogToDrive(username, logText) {
   const safeName = `${username}.txt`;
 
-  // Kiểm tra file tồn tại
   const res = await drive.files.list({
     q: `'${FOLDER_ID}' in parents and name='${safeName}' and trashed=false`,
     fields: "files(id, name)",
@@ -58,14 +60,12 @@ async function saveLogToDrive(username, logText) {
 
     let oldContent = "";
     await new Promise((resolve, reject) => {
-      contentRes.data.on("data", (chunk) => {
-        oldContent += chunk.toString();
-      });
+      contentRes.data.on("data", (chunk) => (oldContent += chunk.toString()));
       contentRes.data.on("end", resolve);
       contentRes.data.on("error", reject);
     });
 
-    // Ghi thêm log mới
+    // Thêm log mới lên đầu
     const newContent = logText + "\n" + oldContent;
     const bufferStream = new stream.PassThrough();
     bufferStream.end(Buffer.from(newContent, "utf-8"));
@@ -104,6 +104,7 @@ app.post("/log-login", async (req, res) => {
 
   try {
     await saveLogToDrive(user, logLine);
+    allLogs.unshift({ type: "login", user, timeVN, ip: clientIp, log: logLine });
     res.json({ ok: true, message: "Đã ghi log vào Google Drive" });
   } catch (err) {
     console.error("❌ Lỗi khi ghi Drive:", err);
@@ -121,11 +122,17 @@ app.post("/log-submit", async (req, res) => {
 
   try {
     await saveLogToDrive(user, logLine);
+    allLogs.unshift({ type: "submit", user, unit, timeVN, ip: clientIp, log: logLine });
     res.json({ ok: true, message: "Đã ghi báo cáo vào Google Drive" });
   } catch (err) {
     console.error("❌ Lỗi khi ghi Drive:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// === API xem toàn bộ logs (từ RAM) ===
+app.get("/get-logs", (req, res) => {
+  res.json({ ok: true, logs: allLogs });
 });
 
 // === Khởi động server ===
