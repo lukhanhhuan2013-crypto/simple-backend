@@ -2,73 +2,61 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const moment = require("moment-timezone");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Thư mục logs
 const LOG_DIR = path.join(__dirname, "logs");
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
-// Hàm trả giờ VN
+// Hàm lấy giờ VN
 function getTimeVN() {
-  return moment().tz("Asia/Ho_Chi_Minh").format("YYYY-MM-DD HH:mm:ss");
+  return new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 }
 
-// Ghi thêm log vào đầu file
-function prependLog(filename, text) {
-  const file = path.join(LOG_DIR, filename);
+// Hàm prepend log (ghi mới lên đầu file)
+function prependLog(line) {
+  const file = path.join(LOG_DIR, "logins.txt");
   let old = "";
   if (fs.existsSync(file)) old = fs.readFileSync(file, "utf8");
-  fs.writeFileSync(file, text + old, "utf8");
+  fs.writeFileSync(file, line + old, "utf8");
 }
 
-// API: đăng nhập
-app.post("/log-login", (req, res) => {
-  const { user } = req.body;
-  if (!user) return res.status(400).json({ ok: false, error: "missing_user" });
-
-  const ip =
-    req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
-    req.socket.remoteAddress;
-
-  const time = getTimeVN();
-  const line = `🔑 Học sinh ${user} đăng nhập lúc ${time} từ IP ${ip}\n`;
-
-  try {
-    prependLog("logins.txt", line);
-    prependLog(`${user}.txt`, line);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false });
-  }
+// Route kiểm tra
+app.get("/", (req, res) => {
+  res.send("✅ Backend đang chạy!");
 });
 
-// API: báo cáo điểm
+// API ghi log khi báo cáo điểm
 app.post("/log-report", (req, res) => {
   const { user, unit, correct, total, score } = req.body;
-  if (!user) return res.status(400).json({ ok: false, error: "missing_user" });
+  if (!user) return res.status(400).json({ ok: false, error: "Thiếu user" });
 
   const ip =
     req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket.remoteAddress;
 
-  const time = getTimeVN();
-  const line = `📊 Học sinh ${user} báo cáo: Thẻ ${unit}, ${correct}/${total} câu, ${score} điểm, lúc ${time}, IP ${ip}\n`;
+  const now = getTimeVN();
+
+  const logLine = `✅ Học sinh ${user} vừa báo cáo:
+📝 Thẻ: ${unit || "N/A"}
+📊 Thực hành: ${correct || "?"}/${total || "?"} đạt ${score || "?"} điểm
+🕒 Thời gian: ${now}
+🌐 IP: ${ip}
+----------------------------------------\n`;
 
   try {
-    prependLog("logins.txt", line);
-    prependLog(`${user}.txt`, line);
-    res.json({ ok: true });
+    prependLog(logLine);
+    res.json({ ok: true, msg: "Đã ghi log thành công!" });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false });
+    console.error("❌ Lỗi ghi log:", e);
+    res.status(500).json({ ok: false, error: "write_failed" });
   }
 });
 
-// API: xem toàn bộ logs
+// API: xem log tổng
 app.get("/get-logs", (req, res) => {
   const file = path.join(LOG_DIR, "logins.txt");
   if (fs.existsSync(file)) {
@@ -78,18 +66,21 @@ app.get("/get-logs", (req, res) => {
   }
 });
 
-// API: xem log cá nhân
+// API: log cá nhân
 app.get("/:user.txt", (req, res) => {
-  const file = path.join(LOG_DIR, `${req.params.user}.txt`);
+  const { user } = req.params;
+  const file = path.join(LOG_DIR, "logins.txt");
   if (fs.existsSync(file)) {
-    res.type("text/plain").send(fs.readFileSync(file, "utf8"));
+    const lines = fs
+      .readFileSync(file, "utf8")
+      .split("\n")
+      .filter((line) => line.includes(`Học sinh ${user} `))
+      .join("\n");
+    res.type("text/plain").send(lines || `Không có log cho ${user}`);
   } else {
-    res.type("text/plain").send(`Chưa có log cho ${req.params.user}`);
+    res.type("text/plain").send("Chưa có log nào.");
   }
 });
 
-// Cổng server
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server chạy ở cổng ${PORT}`);
-});
+app.listen(PORT, () => console.log("🚀 Server chạy ở cổng " + PORT));
